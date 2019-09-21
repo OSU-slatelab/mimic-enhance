@@ -5,10 +5,9 @@ import os
 
 from aecnn import AECNN
 from resnet import ResNet
-from data_io import wav_dataset, mag
+from trainer import Trainer
+from data_io import wav_dataset
 from torch import autograd
-
-import torch.nn.functional as F
 
 def run_training(config):
     """ Define our model and train it """
@@ -68,22 +67,7 @@ def run_training(config):
     tr_dataset = wav_dataset(config, 'tr')
     dt_dataset = wav_dataset(config, 'dt', 4)
 
-    # Initialize optimizer
-    params = []
-    if train_generator:
-        params.append({'params': models['generator'].parameters()})
-    if train_mimic:
-        params.append({'params': models['mimic'].parameters()})
-    optimizer = torch.optim.Adam(params, lr = config.learn_rate)
-    optimizer.zero_grad()
-
-    # Reduce learning rate if we're not improving dev loss
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        patience = config.patience,
-        factor = config.lr_decay,
-        verbose = True,
-    )
+    trainer = Trainer(config, models)
 
     # Run the training
     best_dev_loss = float('inf')
@@ -92,29 +76,14 @@ def run_training(config):
 
         # Train for one epoch
         start_time = time.time()
-        samples = 0
-        for sample in tr_dataset:
-            loss = generate_loss(sample, config, models)
-            loss.backward()
-            samples += 1
-
-            # only do the update if we've reached the batch size
-            if samples % config.batch_size == 0:
-                optimizer.step()
-                optimizer.zero_grad()
-
+        trainer.run_epoch(tr_dataset, training = True)
         total_time = time.time() - start_time
 
         print("Completed epoch %d in %d seconds" % (epoch, int(total_time)))
 
-        # Compute validation loss
-        dev_loss = 0
-        with torch.no_grad():
-            for sample in dt_dataset:
-                dev_loss += generate_loss(sample, config, models) / len(dt_dataset)
+        dev_loss = trainer.run_epoch(dt_dataset, training = False)
 
         print("Dev loss: %f" % dev_loss)
-        scheduler.step(dev_loss)
 
         # Save our model
         if dev_loss < best_dev_loss:
@@ -125,80 +94,6 @@ def run_training(config):
             if train_generator:
                 gfile = os.path.join(config.gcheckpoints, config.gfile)
                 torch.save(models['generator'].state_dict(), gfile)
-
-# Compute loss, using weights for each type of loss
-def generate_loss(sample, config, models):
-
-    # Acoustic model training
-    if 'generator' not in models:
-
-        # Generate spectrogram
-        inputs = mag(sample['clean'].cuda(), truncate = True)
-        target = sample['senone'].cuda()
-        
-        # Ensure equal length
-        newlen = min(inputs.shape[3], target.shape[1])
-        newlen -= newlen % 16
-        inputs = inputs[:, :, :, :newlen]
-        target = target[:, :newlen]
-
-        # Make prediction and evaluate
-        prediction = models['mimic'](inputs)[-1]
-        return config.ce_weight * F.cross_entropy(prediction, target)
-
-    # Enhancement model training
-    else:
-        prediction = models['generator'](sample['noisy'].cuda())
-        target = sample['clean'].cuda()
-        loss = 0
-
-        # We need STFT if any loss other than time-domain is used.
-        if any([config.sm_weight, config.mimic_weight, config.ce_weight] + config.texture_weights):
-            denoised_mag = mag(prediction, truncate = True)
-            clean_mag = mag(target, truncate = True)
-
-            # generate outputs/targets for mimic training
-            if any([config.mimic_weight] + config.texture_weights):
-                predictions = models['mimic'](denoised_mag)
-                if 'teacher' in models:
-                    targets = models['teacher'](clean_mag)
-                else:
-                    targets = models['mimic'](clean_mag)
-
-        # Time-domain loss
-        if config.l1_weight > 0:
-            loss += config.l1_weight * F.l1_loss(prediction, target)
-
-        # Spectral mapping loss
-        if config.sm_weight > 0:
-            loss += config.sm_weight * F.l1_loss(denoised_mag, clean_mag)
-
-        # Mimic loss (perceptual loss)
-        if config.mimic_weight > 0:
-            loss += config.mimic_weight * F.l1_loss(predictions[-1], targets[-1])
-
-        # Texture loss at each convolutional block
-        if any(config.texture_weights):
-            for index in range(len(predictions) - 1):
-                if config.texture_weights[index] > 0:
-                    prediction = get_gram_matrix(predictions[index])
-                    target = get_gram_matrix(targets[index])
-                    loss += config.texture_weights[index] * F.l1_loss(prediction, target)
-
-        # Cross-entropy loss (for joint training?)
-        if config.ce_weight > 0:
-            loss += config.ce_weight * F.cross_entropy(predictions[-1], example['senone'].cuda())
-
-        return loss
-
-def get_gram_matrix(x):
-    feature_maps = x.shape[1]
-    x = x.view(feature_maps, -1)
-    x = (x - torch.mean(x)) / torch.std(x)
-
-    mat = torch.mm(x, x.t())
-
-    return mat
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -229,7 +124,6 @@ def parse_args():
                 parser.add_argument(f"--{arg}", default=default, type=type(default))
 
     return parser.parse_args()
-
 
 def main():
     config = parse_args()
