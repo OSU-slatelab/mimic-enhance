@@ -40,14 +40,14 @@ class Trainer:
                     self.optimizer.zero_grad()
 
         else:
-            dev_loss = 0
+            loss = 0
             with torch.no_grad():
-                for sample in dt_dataset:
-                    dev_loss += self.generate_loss(sample) / len(dt_dataset)
+                for sample in dataset:
+                    loss += self.generate_loss(sample) / len(dataset)
             
-            self.scheduler.step(dev_loss)
+            self.scheduler.step(loss)
 
-            return dev_loss
+            return loss
 
     # Compute loss, using weights for each type of loss
     def generate_loss(self, sample):
@@ -105,8 +105,8 @@ class Trainer:
             if any(self.config.texture_weights):
                 for index in range(len(predictions) - 1):
                     if self.config.texture_weights[index] > 0:
-                        prediction = get_gram_matrix(predictions[index])
-                        target = get_gram_matrix(targets[index])
+                        prediction = predictions[index]
+                        target = targets[index]
                         loss += self.config.texture_weights[index] * F.l1_loss(prediction, target)
 
             # Cross-entropy loss (for joint training?)
