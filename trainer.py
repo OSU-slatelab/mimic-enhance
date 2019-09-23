@@ -56,14 +56,7 @@ class Trainer:
         if 'generator' not in self.models:
 
             # Generate spectrogram
-            inputs = mag(sample['clean'].cuda(), truncate = True)
-            target = sample['senone'].cuda()
-            
-            # Ensure equal length
-            newlen = min(inputs.shape[3], target.shape[1])
-            newlen -= newlen % 16
-            inputs = inputs[:, :, :, :newlen]
-            target = target[:, :newlen]
+            inputs, target = normalize(mag(sample['clean'].cuda(), truncate = True), sample['senone'].cuda())
 
             # Make prediction and evaluate
             prediction = self.models['mimic'](inputs)[-1]
@@ -111,9 +104,20 @@ class Trainer:
 
             # Cross-entropy loss (for joint training?)
             if self.config.ce_weight > 0:
-                loss += self.config.ce_weight * F.cross_entropy(predictions[-1], example['senone'].cuda())
+                inputs, targets = normalize(denoised_mag, sample['senone'].cuda())
+                loss += self.config.ce_weight * F.cross_entropy(self.models['mimic'](inputs)[-1], targets)
 
             return loss
+
+def normalize(inputs, target, factor = 16):
+    
+    # Ensure equal length
+    newlen = min(inputs.shape[3], target.shape[1])
+    newlen -= newlen % factor
+    inputs = inputs[:, :, :, :newlen]
+    target = target[:, :newlen]
+
+    return inputs, target
 
 def get_gram_matrix(x):
     feature_maps = x.shape[1]
