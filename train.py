@@ -63,6 +63,25 @@ def run_training(config):
                 models['teacher'].requires_grad = False
                 models['teacher'].load_state_dict(torch.load(config.mpretrain))
 
+            if config.gan_weight > 0:
+                #models['discriminator'] = ResNet(
+                #    input_dim = 256,
+                #    output_dim = 1,
+                #    channel_counts = config.mchan,
+                #    dropout = 0.2,
+                #    training = True,
+                #).cuda()
+                models['discriminator'] = torch.nn.Sequential(
+                    torch.nn.Linear(config.moutdim, 1024),
+                    torch.nn.ReLU(),
+                    torch.nn.Dropout(p=config.mdrop),
+                    torch.nn.Linear(1024, 1024),
+                    torch.nn.ReLU(),
+                    torch.nn.Dropout(p=config.mdrop),
+                    torch.nn.Linear(1024, 1),
+                    torch.nn.Sigmoid(),
+                ).cuda()
+
     # Initialize datasets
     tr_dataset = wav_dataset(config, 'tr')
     dt_dataset = wav_dataset(config, 'dt', 4)
@@ -105,7 +124,8 @@ def parse_args():
     }
     train_args = {
         'learn_rate': 2e-4, 'lr_decay': 0.5, 'patience': 1, 'epochs': 25, 'batch_size': 4,
-        'l1_weight': 0., 'sm_weight': 0., 'mimic_weight': 0., 'ce_weight': 0., 'texture_weights': [0., 0., 0., 0.],
+        'l1_weight': 0., 'sm_weight': 0., 'mimic_weight': 0., 'ce_weight': 0.,
+        'texture_weights': [0., 0., 0., 0.], 'gan_weight': 0.,
     }
     gen_args = {
         'gmodel': 'aecnn', 'gchan': [64, 128, 256], 'gblocksize': 3, 'gdrop': 0.2, 'gkernel': 11,
