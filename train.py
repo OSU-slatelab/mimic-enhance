@@ -63,24 +63,14 @@ def run_training(config):
                 models['teacher'].requires_grad = False
                 models['teacher'].load_state_dict(torch.load(config.mpretrain))
 
-            if config.gan_weight > 0:
-                #models['discriminator'] = ResNet(
-                #    input_dim = 256,
-                #    output_dim = 1,
-                #    channel_counts = config.mchan,
-                #    dropout = 0.2,
-                #    training = True,
-                #).cuda()
-                models['discriminator'] = torch.nn.Sequential(
-                    torch.nn.Linear(config.moutdim, 1024),
-                    torch.nn.ReLU(),
-                    torch.nn.Dropout(p=config.mdrop),
-                    torch.nn.Linear(1024, 1024),
-                    torch.nn.ReLU(),
-                    torch.nn.Dropout(p=config.mdrop),
-                    torch.nn.Linear(1024, 1),
-                    torch.nn.Sigmoid(),
-                ).cuda()
+    if config.gan_weight > 0:
+        models['discriminator'] = ResNet(
+            input_dim = 256,
+            output_dim = 1,
+            channel_counts = config.mchan,
+            dropout = 0.2,
+            training = True,
+        ).cuda()
 
     # Initialize datasets
     tr_dataset = wav_dataset(config, 'tr')

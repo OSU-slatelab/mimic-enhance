@@ -36,8 +36,8 @@ class Trainer:
             for sample in dataset:
                 samples += 1
 
-                if self.config.gan_weight > 0:
-                    outputs = self.forward(sample)
+                outputs = self.forward(sample)
+                if self.config.gan_weight > 0 and outputs['d_fake'] < 0.8:
                     d_loss = self.discriminate_loss(outputs)
                     d_loss.backward()
 
@@ -45,8 +45,9 @@ class Trainer:
                         self.optimizerD.step()
                         self.optimizerD.zero_grad()
 
-                outputs = self.forward(sample)
-                loss = self.generate_loss(outputs)
+                    outputs = self.forward(sample)
+
+                loss = self.generate_loss(outputs, training)
                 loss.backward()
 
                 if samples % self.config.batch_size == 0:
@@ -58,7 +59,7 @@ class Trainer:
             with torch.no_grad():
                 for sample in dataset:
                     outputs = self.forward(sample)
-                    loss += self.generate_loss(outputs) / len(dataset)
+                    loss += self.generate_loss(outputs, training) / len(dataset)
             
             self.scheduler.step(loss)
 
@@ -75,7 +76,7 @@ class Trainer:
                 'clean_wav': sample['clean'].cuda(),
             }
 
-            if self.config.sm_weight or 'mimic' in self.models:
+            if self.config.sm_weight or self.config.gan_weight or 'mimic' in self.models:
                 outputs['denoised_mag'] = mag(outputs['generator'], truncate = True)
                 outputs['clean_mag'] = mag(outputs['clean_wav'], truncate = True)
 
@@ -87,12 +88,12 @@ class Trainer:
                     else:
                         outputs['soft_label'] = self.models['mimic'](outputs['clean_mag'])
 
-                    if 'discriminator' in self.models:
-                        outputs['d_real'] = self.models['discriminator'](outputs['soft_label'][-1].transpose(1, 2)).mean()
-                        outputs['d_fake'] = self.models['discriminator'](outputs['mimic'][-1].transpose(1, 2)).mean()
+            if 'discriminator' in self.models:
+                outputs['d_real'] = torch.sigmoid(self.models['discriminator'](outputs['clean_mag'])[-1]).mean()
+                outputs['d_fake'] = torch.sigmoid(self.models['discriminator'](outputs['denoised_mag'])[-1]).mean()
 
-                if 'senone' in sample:
-                    outputs['senone'] = sample['senone'].cuda()
+            if 'senone' in sample:
+                outputs['senone'] = sample['senone'].cuda()
 
         return outputs
 
@@ -104,7 +105,7 @@ class Trainer:
         return self.config.gan_weight * (outputs['d_real'] - outputs['d_fake'])
 
     # Compute loss, using weights for each type of loss
-    def generate_loss(self, outputs):
+    def generate_loss(self, outputs, training = False):
 
         # Acoustic model training
         if 'generator' not in self.models:
@@ -139,7 +140,7 @@ class Trainer:
                 inputs, targets = normalize(outputs['denoised_mag'], outputs['senone'])
                 loss += self.config.ce_weight * F.cross_entropy(self.models['mimic'](inputs)[-1], targets)
 
-            if self.config.gan_weight > 0:
+            if self.config.gan_weight > 0 and training:
                 #print("Generator error: %f" % outputs['d_fake'])
                 if outputs['d_fake'] > 0.2:
                     loss += self.config.gan_weight * outputs['d_fake']
