@@ -14,7 +14,7 @@ class Discriminator(nn.Module):
         dropout = 0.2,
         training = True,
     ):
-        super(AECNN, self).__init__()
+        super(Discriminator, self).__init__()
 
         # Store hyperparameters
         self.kernel_size = kernel_size
@@ -60,6 +60,8 @@ class Discriminator(nn.Module):
             # dropout once each block
             if i % self.block_size == 0:
                 x = nn.functional.dropout(x, p = self.dropout)
+
+        x = x.transpose(1, 2)
 
         for layer in self.fc_layers:
             x = self.activation(layer(x))
