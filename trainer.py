@@ -76,7 +76,7 @@ class Trainer:
                 'clean_wav': sample['clean'].cuda(),
             }
 
-            if self.config.sm_weight or self.config.gan_weight or 'mimic' in self.models:
+            if self.config.sm_weight or 'mimic' in self.models:
                 outputs['denoised_mag'] = mag(outputs['generator'], truncate = True)
                 outputs['clean_mag'] = mag(outputs['clean_wav'], truncate = True)
 
@@ -89,8 +89,8 @@ class Trainer:
                         outputs['soft_label'] = self.models['mimic'](outputs['clean_mag'])
 
             if 'discriminator' in self.models:
-                outputs['d_real'] = torch.sigmoid(self.models['discriminator'](outputs['clean_mag'])[-1]).mean()
-                outputs['d_fake'] = torch.sigmoid(self.models['discriminator'](outputs['denoised_mag'])[-1]).mean()
+                outputs['d_real'] = self.models['discriminator'](outputs['clean_wav'])
+                outputs['d_fake'] = self.models['discriminator'](outputs['generator'])
 
             if 'senone' in sample:
                 outputs['senone'] = sample['senone'].cuda()

@@ -5,6 +5,7 @@ import os
 
 from aecnn import AECNN
 from resnet import ResNet
+from discriminator import Discriminator
 from trainer import Trainer
 from data_io import wav_dataset
 from torch import autograd
@@ -64,11 +65,11 @@ def run_training(config):
                 models['teacher'].load_state_dict(torch.load(config.mpretrain))
 
     if config.gan_weight > 0:
-        models['discriminator'] = ResNet(
-            input_dim = 256,
-            output_dim = 1,
-            channel_counts = config.mchan,
-            dropout = 0.2,
+        models['discriminator'] = Discriminator(
+            channel_counts = config.gchan,
+            kernel_size = config.gkernel,
+            block_size = config.gblocksize,
+            dropout = config.gdrop,
             training = True,
         ).cuda()
 
