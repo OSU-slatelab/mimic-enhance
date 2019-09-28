@@ -8,8 +8,7 @@ class AECNN(nn.Module):
         channel_counts = [64, 128, 256],
         kernel_size = 11,
         block_size = 3,
-        #activation = lambda x: nn.functional.leaky_relu(x, negative_slope = 0.3),
-        #activation = lambda x: nn.functional.rrelu(x, training = True)
+        activation = lambda x: nn.functional.leaky_relu(x, negative_slope = 0.3),
         dropout = 0.2,
         training = True,
     ):
@@ -19,7 +18,7 @@ class AECNN(nn.Module):
         self.kernel_size = kernel_size
         self.block_size = block_size
         self.dropout = dropout
-        self.activation = lambda x: nn.functional.rrelu(x, training = training)
+        self.activation = activation
 
         # Initialize all layer containers
         self.encoder_layers = nn.ModuleList()
