@@ -30,7 +30,7 @@ def run_test(config):
     for example in ev_dataset:
         data = np.squeeze(generator(example['noisy'].cuda()).cpu().detach().numpy())
         clean = np.squeeze(example['clean'].numpy())
-        #noisy = np.squeeze(example['noisy'].numpy())
+        noisy = np.squeeze(example['noisy'].numpy())
         score['stoi'] += stoi(clean, data, 16000, extended=False)
         score['estoi'] += stoi(clean, data, 16000, extended=True)
         score['sdr'] += si_sdr(data, clean)
@@ -42,6 +42,7 @@ def run_test(config):
         #        w.write(noisy)
         #    with sf.SoundFile('test.wav', 'w', 16000, 1) as w:
         #        w.write(data)
+        #    break
 
     print('stoi: %f' % (score['stoi'] / count))
     print('estoi: %f' % (score['estoi'] / count))

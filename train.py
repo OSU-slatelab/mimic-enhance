@@ -91,9 +91,11 @@ def run_training(config):
 
         print("Completed epoch %d in %d seconds" % (epoch, int(total_time)))
 
-        dev_loss = trainer.run_epoch(dt_dataset, training = False)
+        dev_loss, dev_losses = trainer.run_epoch(dt_dataset, training = False)
 
         print("Dev loss: %f" % dev_loss)
+        for key in dev_losses:
+            print("%s loss: %f" % (key, dev_losses[key]))
 
         # Save our model
         if dev_loss < best_dev_loss:

@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from data_io import mag
+from collections import defaultdict
 
 class Trainer:
     def __init__(self, config, models):
@@ -17,6 +18,12 @@ class Trainer:
         if self.config.gan_weight > 0:
             self.optimizerD = torch.optim.Adam(models['discriminator'].parameters(), lr = self.config.learn_rate)
             self.optimizerD.zero_grad()
+            self.schedulerD = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizerD,
+                patience = self.config.patience,
+                factor = self.config.lr_decay,
+                verbose = True,
+            )
             
         self.optimizer = torch.optim.Adam(params, lr = self.config.learn_rate)
         self.optimizer.zero_grad()
@@ -37,7 +44,7 @@ class Trainer:
                 samples += 1
 
                 outputs = self.forward(sample)
-                if self.config.gan_weight > 0 and outputs['d_fake'] < 0.8:
+                if self.config.gan_weight > 0:# and outputs['d_fake'] > 0.2:
                     d_loss = self.discriminate_loss(outputs)
                     d_loss.backward()
 
@@ -47,23 +54,30 @@ class Trainer:
 
                     outputs = self.forward(sample)
 
-                loss = self.generate_loss(outputs, training)
-                loss.backward()
+                loss, losses = self.generate_loss(outputs, training)
+                if loss != 0:
+                    loss.backward()
 
                 if samples % self.config.batch_size == 0:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
 
         else:
-            loss = 0
+            dev_loss = 0
+            dev_losses = defaultdict(lambda: 0)
             with torch.no_grad():
                 for sample in dataset:
                     outputs = self.forward(sample)
-                    loss += self.generate_loss(outputs, training) / len(dataset)
+                    loss, losses = self.generate_loss(outputs, training)
+                    dev_loss += loss / len(dataset)
+                    for key in losses:
+                        dev_losses[key] += losses[key] / len(dataset)
             
-            self.scheduler.step(loss)
+            self.scheduler.step(dev_loss)
+            if self.config.gan_weight > 0:
+                self.schedulerD.step(dev_loss)
 
-            return loss
+            return dev_loss, dev_losses
 
     def forward(self, sample):
 
@@ -85,7 +99,7 @@ class Trainer:
 
                     if 'teacher' in self.models:
                         outputs['soft_label'] = self.models['teacher'](outputs['clean_mag'])
-                    else:
+                    elif self.config.mimic_weight or any(self.config.texture_weights):
                         outputs['soft_label'] = self.models['mimic'](outputs['clean_mag'])
 
             if 'discriminator' in self.models:
@@ -102,7 +116,13 @@ class Trainer:
         #print("Discrim real error: %f" % outputs['d_real'])
         #print("Discrim fake error: %f" % outputs['d_fake'])
 
-        return self.config.gan_weight * (outputs['d_real'] - outputs['d_fake'])
+        target_real = torch.ones_like(outputs['d_real'])
+        loss_real = F.binary_cross_entropy(outputs['d_real'], target_real)
+
+        target_fake = torch.zeros_like(outputs['d_fake'])
+        loss_fake = F.binary_cross_entropy(outputs['d_fake'], target_fake)
+
+        return self.config.gan_weight * (loss_real + loss_fake)
 
     # Compute loss, using weights for each type of loss
     def generate_loss(self, outputs, training = False):
@@ -114,18 +134,22 @@ class Trainer:
         # Enhancement model training
         else:
             loss = 0
+            losses = {}
 
             # Time-domain loss
             if self.config.l1_weight > 0:
                 loss += self.config.l1_weight * F.l1_loss(outputs['generator'], outputs['clean_wav'])
+                losses['l1'] = F.l1_loss(outputs['generator'], outputs['clean_wav']).detach()
 
             # Spectral mapping loss
             if self.config.sm_weight > 0:
                 loss += self.config.sm_weight * F.l1_loss(outputs['denoised_mag'], outputs['clean_mag'])
+                losses['sm'] = F.l1_loss(outputs['denoised_mag'], outputs['clean_mag']).detach()
 
             # Mimic loss (perceptual loss)
             if self.config.mimic_weight > 0:
                 loss += self.config.mimic_weight * F.l1_loss(outputs['mimic'][-1], outputs['soft_label'][-1])
+                losses['mimic'] = F.l1_loss(outputs['mimic'][-1], outputs['soft_label'][-1]).detach()
 
             # Texture loss at each convolutional block
             if any(self.config.texture_weights):
@@ -134,18 +158,24 @@ class Trainer:
                         prediction = outputs['mimic'][index]
                         target = outputs['soft_label'][index]
                         loss += self.config.texture_weights[index] * F.l1_loss(prediction, target)
+                        losses['texture%d' % index] = F.l1_loss(prediction, target).detach()
 
             # Cross-entropy loss (for joint training?)
             if self.config.ce_weight > 0:
                 inputs, targets = normalize(outputs['denoised_mag'], outputs['senone'])
                 loss += self.config.ce_weight * F.cross_entropy(self.models['mimic'](inputs)[-1], targets)
+                losses['ce'] = F.cross_entropy(self.models['mimic'](inputs)[-1], targets).detach()
 
-            if self.config.gan_weight > 0 and training:
-                #print("Generator error: %f" % outputs['d_fake'])
-                if outputs['d_fake'] > 0.2:
-                    loss += self.config.gan_weight * outputs['d_fake']
+            if self.config.gan_weight > 0:
+                target = torch.ones_like(outputs['d_fake'])
+                losses['generator'] = F.binary_cross_entropy(outputs['d_fake'], target)
+                print("Generator prediction: %f" % outputs['d_fake'])
+                #print("Generator loss: %f" % losses['generator'])
 
-            return loss
+                if outputs['d_fake'] < 0.4 and training:
+                    loss += self.config.gan_weight * F.binary_cross_entropy(outputs['d_fake'], target)
+
+            return loss, losses
 
 def normalize(inputs, target, factor = 16):
     

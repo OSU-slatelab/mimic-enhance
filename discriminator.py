@@ -10,7 +10,7 @@ class Discriminator(nn.Module):
         block_size = 3,
         activation = lambda x: nn.functional.leaky_relu(x, negative_slope = 0.3),
         fc_layers = 2,
-        fc_nodes = 512,
+        fc_nodes = 1024,
         dropout = 0.2,
         training = True,
     ):
