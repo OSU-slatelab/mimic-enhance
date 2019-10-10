@@ -107,6 +107,10 @@ def run_training(config):
                 gfile = os.path.join(config.gcheckpoints, config.gfile)
                 torch.save(models['generator'].state_dict(), gfile)
 
+        if train_mimic:
+            mfile = os.path.join(config.mcheckpoints, config.mfile)
+            torch.save(models['mimic'].state_dict(), mfile + "-epoch%d" % epoch)
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
