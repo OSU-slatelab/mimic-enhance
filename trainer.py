@@ -82,7 +82,7 @@ class Trainer:
     def forward(self, sample):
 
         if 'generator' not in self.models:
-            outputs = normalize(mag(sample['clean'].cuda(), tuncate = True), sample['senone'].cuda())
+            outputs = normalize(mag(sample['clean'].cuda(), truncate = True), sample['senone'].cuda())
             outputs['mimic'] = self.models['mimic'](outputs['clean_mag'])[-1]
         else:
             outputs = {
@@ -129,7 +129,8 @@ class Trainer:
 
         # Acoustic model training
         if 'generator' not in self.models:
-            return self.config.ce_weight * F.cross_entropy(outputs['mimic'], outputs['senone'])
+            loss = self.config.ce_weight * F.cross_entropy(outputs['mimic'], outputs['senone'])
+            losses = {'ce': F.cross_entropy(outputs['mimic'], outputs['senone'])}
 
         # Enhancement model training
         else:
@@ -175,7 +176,7 @@ class Trainer:
                 if outputs['d_fake'] < 0.4 and training:
                     loss += self.config.gan_weight * F.binary_cross_entropy(outputs['d_fake'], target)
 
-            return loss, losses
+        return loss, losses
 
 def normalize(inputs, target, factor = 16):
     
@@ -185,7 +186,7 @@ def normalize(inputs, target, factor = 16):
     inputs = inputs[:, :, :, :newlen]
     target = target[:, :newlen]
 
-    return inputs, target
+    return {'clean_mag': inputs, 'senone': target}
 
 def get_gram_matrix(x):
     feature_maps = x.shape[1]
