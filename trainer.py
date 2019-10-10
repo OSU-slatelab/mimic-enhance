@@ -81,13 +81,15 @@ class Trainer:
 
     def forward(self, sample):
 
+        device = self.config.device
+
         if 'generator' not in self.models:
-            outputs = normalize(mag(sample['clean'].cuda(), truncate = True), sample['senone'].cuda())
+            outputs = normalize(mag(sample['clean'].to(device), truncate = True), sample['senone'].to(device))
             outputs['mimic'] = self.models['mimic'](outputs['clean_mag'])[-1]
         else:
             outputs = {
-                'generator': self.models['generator'](sample['noisy'].cuda()),
-                'clean_wav': sample['clean'].cuda(),
+                'generator': self.models['generator'](sample['noisy'].to(device)),
+                'clean_wav': sample['clean'].to(device),
             }
 
             if self.config.sm_weight or 'mimic' in self.models:
@@ -107,7 +109,7 @@ class Trainer:
                 outputs['d_fake'] = self.models['discriminator'](outputs['generator'])
 
             if 'senone' in sample:
-                outputs['senone'] = sample['senone'].cuda()
+                outputs['senone'] = sample['senone'].to(device)
 
         return outputs
 

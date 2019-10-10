@@ -19,6 +19,11 @@ def run_training(config):
     load_mimic = config.mpretrain is not None
     train_mimic = config.mcheckpoints is not None
 
+    if torch.cuda.is_available():
+        config.device = torch.device('cuda')
+    else:
+        config.device = torch.device('cpu')
+
     models = {}
 
     # Build enhancement model
@@ -29,7 +34,7 @@ def run_training(config):
             block_size = config.gblocksize,
             dropout = config.gdrop,
             training = train_generator,
-        ).cuda()
+        ).to(config.device)
 
         models['generator'].requires_grad = train_generator
 
@@ -39,13 +44,19 @@ def run_training(config):
     # Build acoustic model
     if load_mimic or train_mimic:
 
+        if config.mact == 'rrelu':
+            activation = lambda x: torch.nn.functional.rrelu(x, training = train_mimic)
+        else:
+            activation = lambda x: torch.nn.functional.leaky_relu(x, negative_slope = 0.3)
+
         models['mimic'] = ResNet(
             input_dim = 256,
             output_dim = config.moutdim,
             channel_counts = config.mchan,
             dropout = config.mdrop,
             training = train_mimic,
-        ).cuda()
+            activation = activation,
+        ).to(config.device)
 
         models['mimic'].requires_grad = train_mimic
 
@@ -59,7 +70,7 @@ def run_training(config):
                     channel_counts = config.mchan,
                     dropout = 0,
                     training = False,
-                ).cuda()
+                ).to(config.device)
 
                 models['teacher'].requires_grad = False
                 models['teacher'].load_state_dict(torch.load(config.mpretrain))
@@ -71,7 +82,7 @@ def run_training(config):
             block_size = config.gblocksize,
             dropout = config.gdrop,
             training = True,
-        ).cuda()
+        ).to(config.device)
 
     # Initialize datasets
     tr_dataset = wav_dataset(config, 'tr')
@@ -128,7 +139,7 @@ def parse_args():
         'gmodel': 'aecnn', 'gchan': [64, 128, 256], 'gblocksize': 3, 'gdrop': 0.2, 'gkernel': 11,
     }
     mim_args = {
-        'mmodel': 'resnet', 'mchan': [64, 128, 256, 512], 'mdrop': 0.2, 'moutdim': 2023,
+        'mmodel': 'resnet', 'mchan': [64, 128, 256, 512], 'mdrop': 0.2, 'moutdim': 2023, 'mact': 'lrelu',
     }
 
     for arg_list in [file_args, train_args, gen_args, mim_args]:
