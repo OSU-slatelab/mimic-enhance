@@ -39,7 +39,7 @@ def run_training(config):
         models['generator'].requires_grad = train_generator
 
         if load_generator:
-            models['generator'].load_state_dict(torch.load(config.gpretrain))
+            models['generator'].load_state_dict(torch.load(config.gpretrain, map_location=config.device))
 
     # Build acoustic model
     if load_mimic or train_mimic:
@@ -61,7 +61,7 @@ def run_training(config):
         models['mimic'].requires_grad = train_mimic
 
         if load_mimic:
-            models['mimic'].load_state_dict(torch.load(config.mpretrain))
+            models['mimic'].load_state_dict(torch.load(config.mpretrain, map_location=config.device))
 
             if config.mimic_weight > 0 or any(config.texture_weights) and train_mimic:
                 models['teacher'] = ResNet(
@@ -73,7 +73,7 @@ def run_training(config):
                 ).to(config.device)
 
                 models['teacher'].requires_grad = False
-                models['teacher'].load_state_dict(torch.load(config.mpretrain))
+                models['teacher'].load_state_dict(torch.load(config.mpretrain, map_location=config.device))
 
     if config.gan_weight > 0:
         models['discriminator'] = Discriminator(
