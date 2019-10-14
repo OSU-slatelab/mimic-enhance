@@ -156,7 +156,7 @@ class Trainer:
 
             # Texture loss at each convolutional block
             if any(self.config.texture_weights):
-                for index in range(len(predictions) - 1):
+                for index in range(len(outputs['mimic']) - 1):
                     if self.config.texture_weights[index] > 0:
                         prediction = outputs['mimic'][index]
                         target = outputs['soft_label'][index]
