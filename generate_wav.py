@@ -24,6 +24,7 @@ def run_test(config):
 
     max_ch = 6 if config.phase == 'tr' else 1
 
+    count = 0
     for ch in range(max_ch):
         dataset = wav_dataset(config, config.phase, ch)
 
@@ -33,6 +34,10 @@ def run_test(config):
                 fname = make_filename(config, ch, example['id'])
                 with sf.SoundFile(fname, 'w', 16000, 1) as w:
                     w.write(data)
+
+                if count % 1000 == 0:
+                    print("finished #%d" % count)
+                count += 1
 
 def make_filename(config, channel, id):
     args = [config.output_dir, config.phase, id + '.wav']

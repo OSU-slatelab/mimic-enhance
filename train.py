@@ -6,6 +6,7 @@ import os
 from aecnn import AECNN
 from resnet import ResNet
 from discriminator import Discriminator
+from embedding import Embedding
 from trainer import Trainer
 from data_io import wav_dataset
 from torch import autograd
@@ -88,6 +89,20 @@ def run_training(config):
     tr_dataset = wav_dataset(config, 'tr')
     dt_dataset = wav_dataset(config, 'dt', 4)
 
+    if config.soft_senone_weight > 0:
+        print("Pretraining senone embeddings")
+        models['embedding'] = Embedding(config.moutdim).to(config.device)
+        models['embedding'].pretrain(tr_dataset, models['mimic'], config.device)
+        print("Completed embedding pretraining")
+    
+    if config.real_senone_file:
+        real_config = config
+        real_config.senone_file = config.real_senone_file
+        real_config.noisy_flist = config.real_flist
+        real_config.noise_flist = None
+        real_config.clean_flist = None
+        tr_real_dataset = wav_dataset(real_config, 'tr')
+
     trainer = Trainer(config, models)
 
     # Run the training
@@ -118,10 +133,6 @@ def run_training(config):
                 gfile = os.path.join(config.gcheckpoints, config.gfile)
                 torch.save(models['generator'].state_dict(), gfile)
 
-        if train_mimic:
-            mfile = os.path.join(config.mcheckpoints, config.mfile)
-            torch.save(models['mimic'].state_dict(), mfile + "-epoch%d" % epoch)
-
 def parse_args():
     parser = argparse.ArgumentParser()
 
@@ -129,11 +140,12 @@ def parse_args():
         'base_dir': None, 'clean_flist': None, 'noise_flist': None, 'noisy_flist': None, 'senone_file': None,
         'gpretrain': None, 'gcheckpoints': None, 'mpretrain': None, 'mcheckpoints': None,
         'mfile': 'model.pt', 'gfile': 'model.pt', 'output_dir': None, 'phase': None,
+        'real_flist': None, 'real_senone_file': None,
     }
     train_args = {
         'learn_rate': 2e-4, 'lr_decay': 0.5, 'patience': 1, 'epochs': 25, 'batch_size': 4,
-        'l1_weight': 0., 'sm_weight': 0., 'mimic_weight': 0., 'ce_weight': 0.,
-        'texture_weights': [0., 0., 0., 0.], 'gan_weight': 0.,
+        'l1_weight': 0., 'sm_weight': 0., 'mimic_weight': 0., 'ce_weight': 0., 'real_ce_weight': 0.,
+        'texture_weights': [0., 0., 0., 0.], 'gan_weight': 0., 'soft_senone_weight': 0.,
     }
     gen_args = {
         'gmodel': 'aecnn', 'gchan': [64, 128, 256], 'gblocksize': 3, 'gdrop': 0.2, 'gkernel': 11,

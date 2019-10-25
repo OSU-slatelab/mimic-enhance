@@ -36,7 +36,7 @@ class Trainer:
             verbose = True,
         )
 
-    def run_epoch(self, dataset, training = False):
+    def run_epoch(self, dataset, training = False, real = False):
 
         if training:
             samples = 0
@@ -54,7 +54,7 @@ class Trainer:
 
                     outputs = self.forward(sample)
 
-                loss, losses = self.generate_loss(outputs, training)
+                loss, losses = self.generate_loss(outputs, training, real)
                 if loss != 0:
                     loss.backward()
 
@@ -85,24 +85,31 @@ class Trainer:
 
         if 'generator' not in self.models:
             outputs = normalize(mag(sample['clean'].to(device), truncate = True), sample['senone'].to(device))
-            outputs['mimic'] = self.models['mimic'](outputs['clean_mag'])[-1]
+            outputs['mimic'] = self.models['mimic'](outputs['clean_mag'])
         else:
             outputs = {
                 'generator': self.models['generator'](sample['noisy'].to(device)),
-                'clean_wav': sample['clean'].to(device),
             }
+            if 'clean' in sample:
+                outputs['clean_wav'] = sample['clean'].to(device)
 
             if self.config.sm_weight or 'mimic' in self.models:
                 outputs['denoised_mag'] = mag(outputs['generator'], truncate = True)
-                outputs['clean_mag'] = mag(outputs['clean_wav'], truncate = True)
+
+                if 'clean' in sample:
+                    outputs['clean_mag'] = mag(outputs['clean_wav'], truncate = True)
 
                 if 'mimic' in self.models:
                     outputs['mimic'] = self.models['mimic'](outputs['denoised_mag'])
 
-                    if 'teacher' in self.models:
+                    mimic_losses = self.config.texture_weights + \
+                            [self.config.mimic_weight, self.config.soft_senone_weight]
+
+                    if 'teacher' in self.models and 'clean' in sample:
                         outputs['soft_label'] = self.models['teacher'](outputs['clean_mag'])
-                    elif self.config.mimic_weight or any(self.config.texture_weights):
+                    elif any(mimic_losses) and 'clean' in sample:
                         outputs['soft_label'] = self.models['mimic'](outputs['clean_mag'])
+                    
 
             if 'discriminator' in self.models:
                 outputs['d_real'] = self.models['discriminator'](outputs['clean_wav'])
@@ -111,28 +118,31 @@ class Trainer:
             if 'senone' in sample:
                 outputs['senone'] = sample['senone'].to(device)
 
+            if self.config.soft_senone_weight:
+                outputs['embedding'] = self.models['embedding'](outputs['senone']).transpose(1, 2)
+
         return outputs
 
     def discriminate_loss(self, outputs):
 
-        #print("Discrim real error: %f" % outputs['d_real'])
-        #print("Discrim fake error: %f" % outputs['d_fake'])
+        #print("Discrim real error: %f" % outputs['d_real'].mean())
+        #print("Discrim fake error: %f" % outputs['d_fake'].mean())
 
         target_real = torch.ones_like(outputs['d_real'])
-        loss_real = F.binary_cross_entropy(outputs['d_real'], target_real)
+        loss_real = F.l1_loss(outputs['d_real'], target_real)
 
         target_fake = torch.zeros_like(outputs['d_fake'])
-        loss_fake = F.binary_cross_entropy(outputs['d_fake'], target_fake)
+        loss_fake = F.l1_loss(outputs['d_fake'], target_fake)
 
         return self.config.gan_weight * (loss_real + loss_fake)
 
     # Compute loss, using weights for each type of loss
-    def generate_loss(self, outputs, training = False):
+    def generate_loss(self, outputs, training = False, real = False):
 
         # Acoustic model training
-        if 'generator' not in self.models:
-            loss = self.config.ce_weight * F.cross_entropy(outputs['mimic'], outputs['senone'])
-            losses = {'ce': F.cross_entropy(outputs['mimic'], outputs['senone'])}
+        if 'generator' not in self.models or real:
+            loss = self.config.ce_weight * truncate_and_ce(outputs['mimic'][-1], outputs['senone'])
+            losses = {'ce': truncate_and_ce(outputs['mimic'][-1], outputs['senone'])}
 
         # Enhancement model training
         else:
@@ -165,18 +175,24 @@ class Trainer:
 
             # Cross-entropy loss (for joint training?)
             if self.config.ce_weight > 0:
-                inputs, targets = normalize(outputs['denoised_mag'], outputs['senone'])
-                loss += self.config.ce_weight * F.cross_entropy(self.models['mimic'](inputs)[-1], targets)
-                losses['ce'] = F.cross_entropy(self.models['mimic'](inputs)[-1], targets).detach()
+                #norm = normalize(outputs['denoised_mag'], outputs['senone'])
+                #outputs = self.models['mimic'](norm['clean_mag'])[-1]
+                #targets = norm['senone']
+                loss += self.config.ce_weight * truncate_and_ce(outputs['mimic'], outputs['senone'])
+                losses['ce'] = truncate_and_ce(outputs['mimic'], outputs['senone']).detach()
 
             if self.config.gan_weight > 0:
                 target = torch.ones_like(outputs['d_fake'])
-                losses['generator'] = F.binary_cross_entropy(outputs['d_fake'], target)
-                print("Generator prediction: %f" % outputs['d_fake'])
+                losses['generator'] = F.mse_loss(outputs['d_fake'], target)
+                #print("Generator prediction: %f" % outputs['d_fake'].mean())
                 #print("Generator loss: %f" % losses['generator'])
 
-                if outputs['d_fake'] < 0.4 and training:
-                    loss += self.config.gan_weight * F.binary_cross_entropy(outputs['d_fake'], target)
+                if training:#outputs['d_fake'].mean() < 0.4 and training:
+                    loss += self.config.gan_weight * F.l1_loss(outputs['d_fake'], target)
+
+            if self.config.soft_senone_weight > 0:
+                losses['soft_senone'] = truncate_and_l1(outputs['mimic'][-1], outputs['embedding']).detach()
+                loss += self.config.soft_senone_weight * truncate_and_l1(outputs['mimic'][-1], outputs['embedding'])
 
         return loss, losses
 
@@ -198,3 +214,19 @@ def get_gram_matrix(x):
     mat = torch.mm(x, x.t())
 
     return mat
+
+def truncate_and_l1(inputs, target):
+    newlen = min(inputs.shape[-1], target.shape[-1])
+
+    inputs = inputs[:, :, :newlen]
+    target = target[:, :, :newlen]
+
+    return F.l1_loss(inputs, target)
+    
+def truncate_and_ce(inputs, target):
+    newlen = min(inputs.shape[-1], target.shape[-1])
+
+    inputs = inputs[:, :, :newlen]
+    target = target[:, :newlen]
+
+    return F.cross_entropy(inputs, target)

@@ -65,7 +65,6 @@ class Discriminator(nn.Module):
 
         for layer in self.fc_layers:
             x = self.activation(layer(x))
-            x = nn.functional.dropout(x, p = self.dropout)
 
         # Reduce to 1 channel and scale from -1 to 1
-        return torch.sigmoid(x).mean()
+        return x
